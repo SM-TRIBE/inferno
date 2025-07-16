@@ -1,55 +1,55 @@
-const { Pool } = require('pg');
-require('dotenv').config();
+const { Markup } = require('telegraf');
+const db = require('../services/db');
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
+// Exact main menu layout
+const MAIN_MENU_KEYBOARD = Markup.keyboard([
+    ['🔍 Find Partner'],
+    ['👤 Edit Profile', '💰 My Coins'],
+    ['💬 Anonymous Chat', '🎁 Free Coins'],
+    ['🛒 Buy Coins', '🔗 Personal Link']
+]).resize();
 
-const query = (text, params) => pool.query(text, params);
+async function showMainMenu(ctx) {
+    return ctx.reply('Main Menu:', MAIN_MENU_KEYBOARD);
+}
 
-// --- User & Coin Management ---
-const findUserById = (id) => query('SELECT * FROM users WHERE id = $1', [id]);
-const createUser = (id, firstName, username, referrerId = null) => query('INSERT INTO users (id, first_name, username, referrer_id) VALUES ($1, $2, $3, $4) RETURNING *', [id, firstName, username, referrerId]);
-const updateUserCoins = (id, amount) => query('UPDATE users SET coins = coins + $1 WHERE id = $2 RETURNING coins', [id, amount]);
-const getUserCoins = async (id) => (await query('SELECT coins FROM users WHERE id = $1', [id])).rows[0]?.coins || 0;
+// --- Handlers for each button ---
+async function handleFindPartner(ctx) {
+    return ctx.scene.enter('partner-search-wizard');
+}
 
-// --- Profile Management ---
-const findProfileById = (userId) => query('SELECT * FROM profiles WHERE user_id = $1', [userId]);
-const createProfile = (userId) => query('INSERT INTO profiles (user_id) VALUES ($1)', [userId]);
-const updateProfile = (userId, field, value) => query(`UPDATE profiles SET ${field} = $1 WHERE user_id = $2`, [value, userId]);
+async function handleEditProfile(ctx) {
+    // We'll create this scene next
+    return ctx.scene.enter('profile-edit-wizard');
+}
 
-// --- Interaction Management ---
-const blockUser = (blockerId, blockedId) => query('INSERT INTO blocks (blocker_id, blocked_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [blockerId, blockedId]);
-const createChatRequest = (requesterId, requestedId) => query('INSERT INTO chat_requests (requester_id, requested_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [requesterId, requestedId]);
+async function handleMyCoins(ctx) {
+    const coins = await db.getUserCoins(ctx.from.id);
+    // You can add logic here to count referrals from the DB
+    return ctx.reply(`💰 You currently have ${coins} coins.`);
+}
 
-// --- Partner Search ---
-const findPartners = async (userId, filters) => {
-    let sql = `
-        SELECT p.*, u.first_name FROM profiles p
-        JOIN users u ON p.user_id = u.id
-        WHERE p.profile_status = 'ACTIVE'
-        AND p.user_id != $1
-        AND NOT EXISTS (SELECT 1 FROM blocks WHERE (blocker_id = $1 AND blocked_id = p.user_id) OR (blocker_id = p.user_id AND blocked_id = $1))
-        AND NOT EXISTS (SELECT 1 FROM likes WHERE liker_id = $1 AND liked_id = p.user_id)
-    `;
-    const params = [userId];
-    let paramIndex = 2;
+async function handleAnonymousChat(ctx) {
+    return ctx.reply('Anonymous Chat feature is under development.');
+}
 
-    if (filters.gender) { sql += ` AND p.gender = $${paramIndex++}`; params.push(filters.gender); }
-    if (filters.city) { sql += ` AND p.city ILIKE $${paramIndex++}`; params.push(`%${filters.city}%`); }
-    if (filters.orientation) { sql += ` AND p.orientation = $${paramIndex++}`; params.push(filters.orientation); }
-    if (filters.fantasy) { sql += ` AND p.fantasy = $${paramIndex++}`; params.push(filters.fantasy); }
-    if (filters.minAge) { sql += ` AND p.age >= $${paramIndex++}`; params.push(filters.minAge); }
-    if (filters.maxAge) { sql += ` AND p.age <= $${paramIndex++}`; params.push(filters.maxAge); }
+async function handleFreeCoins(ctx) {
+    return ctx.reply('You can get free coins by sharing your Personal Link!');
+}
 
-    sql += ' ORDER BY random() LIMIT 20';
-    return query(sql, params);
-};
+async function handleBuyCoins(ctx) {
+    // This mimics the video, providing an ID/address for manual payment
+    const paymentId = '...'; // Your Tron/wallet address or payment ID
+    return ctx.reply(`To buy coins, please transfer funds to the following address and contact support:\n\nAddress: \`${paymentId}\`\n\nSupport: @monster_eks`, { parse_mode: 'Markdown' });
+}
 
+async function handlePersonalLink(ctx) {
+    const link = `https://t.me/${process.env.BOT_USERNAME}?start=${ctx.from.id}`;
+    return ctx.reply(`Share your personal link to get 10 free coins for every user who joins!\n\n${link}`);
+}
 
 module.exports = {
-    findUserById, createUser, updateUserCoins, getUserCoins,
-    findProfileById, createProfile, updateProfile,
-    blockUser, createChatRequest, findPartners
+    showMainMenu,
+    handleFindPartner, handleEditProfile, handleMyCoins,
+    handleAnonymousChat, handleFreeCoins, handleBuyCoins, handlePersonalLink
 };
